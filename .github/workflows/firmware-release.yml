@@ -1,0 +1,78 @@
+name: Build and publish firmware
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "include/**"
+      - "tools/**"
+      - "platformio.ini"
+      - ".github/workflows/firmware-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: firmware-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install --disable-pip-version-check platformio==6.2.0
+
+      - name: Read firmware version
+        id: version
+        shell: bash
+        run: |
+          version="$(python tools/read_app_version.py)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Firmware version: $version"
+
+      - name: Build firmware
+        run: pio run -e jc2432w328c
+
+      - name: Prepare OTA assets
+        run: >-
+          python tools/prepare_release.py
+          "$GITHUB_REPOSITORY"
+          "${{ steps.version.outputs.version }}"
+
+      - name: Refuse to overwrite an existing version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release v$VERSION already exists. Increase APP_VERSION."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          gh release create "v$VERSION" \
+            dist/firmware.bin \
+            dist/version.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Firmware v$VERSION" \
+            --notes "Automatic OTA firmware release v$VERSION" \
+            --latest

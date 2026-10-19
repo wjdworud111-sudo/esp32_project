@@ -1,0 +1,9 @@
+.pio/
+.platformio/
+.vscode-extensions/
+.vscode-user/
+.tools/
+dist/
+debug.log
+
+
