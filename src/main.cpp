@@ -8,7 +8,6 @@
 #include "wifi_touch_setup.h"
 
 ClockDisplay display;
-LGFX_Sprite clockSprite(&display);
 Cst820Touch touch;
 WifiTouchSetup wifiSetup(display, touch);
 AutoUpdater updater(APP_VERSION, OTA_MANIFEST_URL);
@@ -22,7 +21,6 @@ String drawnTime;
 String drawnDate;
 String drawnStatus;
 bool frameInvalid = true;
-bool clockSpriteReady = false;
 bool drawnUpdateAvailable = false;
 
 void centerText(const char* text, int y, int size, uint16_t color) {
@@ -100,18 +98,28 @@ void drawClock() {
     : WiFi.status() != WL_CONNECTED ? "Wi-Fi connecting..."
     : !validTime ? "NTP syncing..." : "Wi-Fi connected / KST";
 
-  // Render the changing seconds into RAM first, then transfer the completed
-  // area in one operation. The LCD never sees a blank intermediate frame.
   if (clockText != drawnTime) {
-    if (clockSpriteReady) {
-      clockSprite.fillSprite(Background);
-      clockSprite.setTextDatum(lgfx::textdatum_t::middle_center);
-      clockSprite.setTextSize(5);
-      clockSprite.setTextColor(TFT_WHITE, Background);
-      clockSprite.drawString(clockText, 150, 30);
-      clockSprite.pushSprite(10, 76);
+    display.setTextDatum(lgfx::textdatum_t::middle_center);
+    display.setTextSize(5);
+    display.setTextColor(TFT_WHITE, Background);
+    if (drawnTime.length() == clockText.length() && clockText.length() == 8) {
+      const int totalWidth = display.textWidth(clockText);
+      const int left = (320 - totalWidth) / 2;
+      int prefixWidth = 0;
+      for (uint8_t i = 0; i < clockText.length(); ++i) {
+        const String character = clockText.substring(i, i + 1);
+        const String oldCharacter = drawnTime.substring(i, i + 1);
+        const int characterWidth = display.textWidth(character);
+        if (character != oldCharacter) {
+          const int x = left + prefixWidth;
+          display.fillRect(x, 76, characterWidth, 60, Background);
+          display.drawString(character, x + characterWidth / 2, 106);
+        }
+        prefixWidth += characterWidth;
+      }
     } else {
-      centerText(clockText.c_str(), 87, 5, TFT_WHITE);
+      display.fillRect(0, 76, 320, 60, Background);
+      display.drawString(clockText, 160, 106);
     }
     drawnTime = clockText;
   }
@@ -134,11 +142,6 @@ void setup() {
   Serial.begin(115200);
   display.init();
   display.setRotation(1);
-  clockSprite.setColorDepth(16);
-  clockSpriteReady = clockSprite.createSprite(300, 60) != nullptr;
-  if (!clockSpriteReady) {
-    Serial.println("Clock sprite allocation failed.");
-  }
   pinMode(ClockDisplay::Backlight, OUTPUT);
   digitalWrite(ClockDisplay::Backlight, HIGH);
   touch.begin();
