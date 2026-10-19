@@ -23,6 +23,7 @@ String drawnDate;
 String drawnStatus;
 bool frameInvalid = true;
 bool clockSpriteReady = false;
+bool drawnUpdateAvailable = false;
 
 void centerText(const char* text, int y, int size, uint16_t color) {
   display.setTextSize(size);
@@ -38,6 +39,20 @@ void showMessage(const String& title, const String& detail = "") {
   frameInvalid = true;
 }
 
+void drawUpdateBadge(bool available) {
+  if (!available) {
+    display.fillRect(245, 8, 70, 36, Background);
+    return;
+  }
+  constexpr uint16_t UpdateColor = 0xE986;
+  display.fillRoundRect(245, 8, 70, 34, 5, UpdateColor);
+  display.drawRoundRect(245, 8, 70, 34, 5, TFT_WHITE);
+  display.setTextDatum(lgfx::textdatum_t::middle_center);
+  display.setTextSize(1);
+  display.setTextColor(TFT_WHITE, UpdateColor);
+  display.drawString("UPDATE", 280, 25);
+}
+
 void drawFrame() {
   display.fillScreen(Background);
   centerText("SEOUL CLOCK", 24, 2, Accent);
@@ -48,6 +63,8 @@ void drawFrame() {
   display.setTextSize(1);
   display.setTextColor(TFT_WHITE, 0x18E3);
   display.drawString("Wi-Fi", 284, 218);
+  drawUpdateBadge(updater.updateAvailable());
+  drawnUpdateAvailable = updater.updateAvailable();
   drawnTime = "";
   drawnDate = "";
   drawnStatus = "";
@@ -56,6 +73,11 @@ void drawFrame() {
 
 void drawClock() {
   if (frameInvalid) drawFrame();
+  const bool updateAvailable = updater.updateAvailable();
+  if (drawnUpdateAvailable != updateAvailable) {
+    drawUpdateBadge(updateAvailable);
+    drawnUpdateAvailable = updateAvailable;
+  }
   const time_t now = time(nullptr);
   const bool validTime = now >= 1704067200;
   String clockText;
@@ -73,7 +95,9 @@ void drawClock() {
     clockText = "--:--:--";
     dateText = "Waiting for time";
   }
-  const String status = WiFi.status() != WL_CONNECTED ? "Wi-Fi connecting..."
+  const String status = updater.updateAvailable()
+    ? String("Update v") + updater.availableVersion() + " - tap UPDATE"
+    : WiFi.status() != WL_CONNECTED ? "Wi-Fi connecting..."
     : !validTime ? "NTP syncing..." : "Wi-Fi connected / KST";
 
   // Render the changing seconds into RAM first, then transfer the completed
@@ -129,7 +153,21 @@ void setup() {
   const bool connected = wifiSetup.connectSaved(12000) || wifiSetup.run();
   Serial.println(connected ? "Wi-Fi connected." : "Wi-Fi setup cancelled.");
   lastReconnect = millis();
-  updater.begin([](const String& status) { showMessage(status); });
+  updater.begin([](const String& status) {
+    if (status.startsWith("OTA: update available:")) {
+      drawUpdateBadge(true);
+      drawnUpdateAvailable = true;
+      display.fillRect(0, 201, 248, 38, Background);
+      display.setTextDatum(lgfx::textdatum_t::middle_left);
+      display.setTextSize(1);
+      display.setTextColor(0xE986, Background);
+      display.drawString((String("Update v") + updater.availableVersion() + " - tap UPDATE").c_str(), 10, 220);
+      drawnStatus = String("Update v") + updater.availableVersion() + " - tap UPDATE";
+    } else if (status.startsWith("OTA: downloading") || status.startsWith("OTA: update complete") ||
+               status.startsWith("OTA: update failed")) {
+      showMessage("Firmware update", status);
+    }
+  });
   drawFrame();
   drawClock();
 }
@@ -147,13 +185,19 @@ void loop() {
   }
   updater.loop();
   int16_t touchX, touchY;
-  if (touch.tap(touchX, touchY) && touchX >= 253 && touchY >= 201) {
-    const bool connected = wifiSetup.run();
-    Serial.println(connected ? "Wi-Fi settings updated." : "Wi-Fi settings cancelled.");
-    ntpStarted = false;
-    lastReconnect = millis();
-    drawFrame();
-    drawClock();
+  if (touch.tap(touchX, touchY)) {
+    if (updater.updateAvailable() && touchX >= 245 && touchY <= 45) {
+      updater.installAvailableUpdate();
+      frameInvalid = true;
+      drawClock();
+    } else if (touchX >= 253 && touchY >= 201) {
+      const bool connected = wifiSetup.run();
+      Serial.println(connected ? "Wi-Fi settings updated." : "Wi-Fi settings cancelled.");
+      ntpStarted = false;
+      lastReconnect = millis();
+      drawFrame();
+      drawClock();
+    }
   }
   if (tick - lastFrame >= 1000) {
     lastFrame = tick;

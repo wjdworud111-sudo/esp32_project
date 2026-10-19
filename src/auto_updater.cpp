@@ -67,8 +67,28 @@ bool AutoUpdater::enabled() const {
   return !manifestUrl_.isEmpty();
 }
 
+bool AutoUpdater::updateAvailable() const {
+  return !availableUrl_.isEmpty() && availableSha256_.length() == 64;
+}
+
+const String& AutoUpdater::availableVersion() const {
+  return availableVersion_;
+}
+
+bool AutoUpdater::installAvailableUpdate() {
+  if (!updateAvailable() || WiFi.status() != WL_CONNECTED) {
+    report("OTA: update unavailable or Wi-Fi disconnected");
+    return false;
+  }
+  report("OTA: user selected update " + availableVersion_);
+  notify("OTA: downloading 0%");
+  const bool succeeded = install(availableUrl_, availableSha256_);
+  if (!succeeded) notify("OTA: update failed; tap UPDATE to retry");
+  return succeeded;
+}
+
 void AutoUpdater::loop() {
-  if (!enabled() || WiFi.status() != WL_CONNECTED || time(nullptr) < 1704067200) {
+  if (!enabled() || updateAvailable() || WiFi.status() != WL_CONNECTED || time(nullptr) < 1704067200) {
     connectionSeen_ = false;
     return;
   }
@@ -96,6 +116,10 @@ bool AutoUpdater::isNewer(const String& candidate) const {
 
 void AutoUpdater::report(const String& message) const {
   Serial.println(message);
+}
+
+void AutoUpdater::notify(const String& message) const {
+  report(message);
   if (callback_) callback_(message);
 }
 
@@ -141,8 +165,11 @@ bool AutoUpdater::checkForUpdate() {
     return true;
   }
 
-  report("OTA: updating to " + version);
-  return install(firmwareUrl, sha256);
+  availableVersion_ = version;
+  availableUrl_ = firmwareUrl;
+  availableSha256_ = sha256;
+  notify("OTA: update available: " + version);
+  return true;
 }
 
 bool AutoUpdater::install(const String& url, const String& expectedSha256) {
@@ -212,7 +239,7 @@ bool AutoUpdater::install(const String& url, const String& expectedSha256) {
       const int percent = static_cast<int>((total * 100U) / contentLength);
       if (percent / 10 != lastPercent / 10) {
         lastPercent = percent;
-        report("OTA: downloading " + String(percent) + "%");
+        notify("OTA: downloading " + String(percent) + "%");
       }
     }
   }
@@ -239,7 +266,7 @@ bool AutoUpdater::install(const String& url, const String& expectedSha256) {
     return false;
   }
 
-  report("OTA: update complete, restarting");
+  notify("OTA: update complete, restarting");
   delay(1200);
   ESP.restart();
   return true;
