@@ -209,7 +209,9 @@ bool AutoUpdater::install(const String& url, const String& expectedSha256) {
   mbedtls_sha256_starts_ret(&sha, 0);
 
   WiFiClient* stream = http.getStreamPtr();
-  uint8_t buffer[4096];
+  // Keep the download buffer out of loopTask's stack. OTA runs synchronously
+  // from the main loop and the TLS/HTTP call stack is already substantial.
+  static uint8_t buffer[4096];
   size_t total = 0;
   uint32_t lastDataAt = millis();
   int lastPercent = -1;
