@@ -7,7 +7,8 @@
 #include <WiFiClientSecure.h>
 #include <mbedtls/sha256.h>
 
-#include "github_root_ca.h"
+
+extern const uint8_t rootca_crt_bundle_start[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 
 namespace {
 constexpr uint32_t InitialCheckDelayMs = 30000;
@@ -127,7 +128,7 @@ bool AutoUpdater::checkForUpdate() {
   report("OTA: checking for update");
 
   WiFiClientSecure client;
-  client.setCACert(GITHUB_ROOT_CA);
+  client.setCACertBundle(rootca_crt_bundle_start);
   HTTPClient http;
   http.setConnectTimeout(10000);
   http.setTimeout(10000);
@@ -174,7 +175,7 @@ bool AutoUpdater::checkForUpdate() {
 
 bool AutoUpdater::install(const String& url, const String& expectedSha256) {
   WiFiClientSecure client;
-  client.setCACert(GITHUB_ROOT_CA);
+  client.setCACertBundle(rootca_crt_bundle_start);
   HTTPClient http;
   http.setConnectTimeout(15000);
   http.setTimeout(15000);

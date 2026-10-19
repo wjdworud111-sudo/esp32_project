@@ -1,7 +1,7 @@
 #pragma once
 
 // Increment this for every published firmware release.
-#define APP_VERSION "1.4.0"
+#define APP_VERSION "1.6.0"
 
 // The latest GitHub Release must contain version.json and firmware.bin.
 #define OTA_MANIFEST_URL \

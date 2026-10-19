@@ -22,6 +22,11 @@ String drawnDate;
 String drawnStatus;
 bool frameInvalid = true;
 bool drawnUpdateAvailable = false;
+constexpr uint8_t BootButtonPin = 0;
+constexpr uint32_t CalibrationHoldMs = 1500;
+bool bootButtonPressed = false;
+bool calibrationStarted = false;
+uint32_t bootButtonPressedAt = 0;
 
 void centerText(const char* text, int y, int size, uint16_t color) {
   display.setTextSize(size);
@@ -138,8 +143,86 @@ void drawClock() {
   }
 }
 
+void drawCalibrationTarget(int16_t x, int16_t y, uint8_t step) {
+  display.fillScreen(Background);
+  display.setTextDatum(lgfx::textdatum_t::middle_center);
+  display.setTextSize(2);
+  display.setTextColor(Accent, Background);
+  display.drawString("Touch calibration", 160, 105);
+  display.setTextSize(1);
+  display.setTextColor(Muted, Background);
+  display.drawString((String("Tap the cross  ") + String(step) + "/4").c_str(), 160, 130);
+  display.drawCircle(x, y, 13, TFT_WHITE);
+  display.drawCircle(x, y, 4, Accent);
+  display.drawFastHLine(x - 19, y, 39, Accent);
+  display.drawFastVLine(x, y - 19, 39, Accent);
+}
+
+void runTouchCalibration() {
+  constexpr int16_t targetX[4] = {20, 299, 299, 20};
+  constexpr int16_t targetY[4] = {20, 20, 219, 219};
+  int16_t rawX[4]{};
+  int16_t rawY[4]{};
+
+  Serial.println("Touch calibration started from BOOT button.");
+  for (uint8_t i = 0; i < 4; ++i) {
+    drawCalibrationTarget(targetX[i], targetY[i], i + 1);
+    const uint32_t started = millis();
+    bool captured = false;
+    while (millis() - started < 30000) {
+      if (touch.rawTap(rawX[i], rawY[i])) {
+        captured = true;
+        Serial.printf("Calibration point %u: rawX=%d rawY=%d\n", i + 1, rawX[i], rawY[i]);
+        break;
+      }
+      delay(10);
+    }
+    if (!captured) {
+      showMessage("Calibration timed out", "Hold BOOT to try again");
+      delay(1000);
+      frameInvalid = true;
+      drawnTime = "";
+      drawnDate = "";
+      drawnStatus = "";
+      drawClock();
+      Serial.println("Touch calibration timed out.");
+      return;
+    }
+  }
+
+  const bool saved = touch.saveCalibration(rawX, rawY, targetX, targetY);
+  showMessage(saved ? "Calibration saved" : "Calibration failed",
+              saved ? "Touch points were stored" : "Tap points again");
+  Serial.println(saved ? "Touch calibration saved to NVS." : "Touch calibration rejected.");
+  delay(1000);
+  frameInvalid = true;
+  drawnTime = "";
+  drawnDate = "";
+  drawnStatus = "";
+  drawClock();
+}
+
+bool checkBootButton() {
+  if (digitalRead(BootButtonPin) != LOW) {
+    bootButtonPressed = false;
+    calibrationStarted = false;
+    return false;
+  }
+  if (!bootButtonPressed) {
+    bootButtonPressed = true;
+    bootButtonPressedAt = millis();
+  }
+  if (!calibrationStarted && millis() - bootButtonPressedAt >= CalibrationHoldMs) {
+    calibrationStarted = true;
+    runTouchCalibration();
+    return true;
+  }
+  return false;
+}
+
 void setup() {
   Serial.begin(115200);
+  pinMode(BootButtonPin, INPUT_PULLUP);
   display.init();
   display.setRotation(1);
   pinMode(ClockDisplay::Backlight, OUTPUT);
@@ -185,6 +268,10 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED && tick - lastReconnect >= 30000) {
     lastReconnect = tick;
     WiFi.reconnect();
+  }
+  if (checkBootButton()) {
+    delay(10);
+    return;
   }
   updater.loop();
   int16_t touchX, touchY;
